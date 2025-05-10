@@ -1,0 +1,103 @@
+-- Get clipboard content first
+try
+	set rawClipboard to the clipboard as text
+on error
+	set rawClipboard to ""
+end try
+
+set trimmedClipboardText to ""
+if rawClipboard is not "" then
+	-- Trim leading/trailing whitespace
+	set trimmedClipboardText to do shell script "echo " & quoted form of rawClipboard & " | sed -E 's/^[[:space:]]+|[[:space:]]+$//g'"
+end if
+
+-- Check if the trimmed clipboard content is a URL
+if trimmedClipboardText is not "" then
+	set isLikelyURL to false
+	set lowerTrimmedText to do shell script "echo " & quoted form of trimmedClipboardText & " | tr '[:upper:]' '[:lower:]'" -- Convert to lowercase for checks
+	
+	-- 1. Check for http:// or https:// prefix
+	if (lowerTrimmedText begins with "http://") or (lowerTrimmedText begins with "https://") then
+		set isLikelyURL to true
+	else
+		-- 2. Check for common TLDs (and ensure it's not just a filename like "archive.zip")
+		if not (lowerTrimmedText contains " ") and not (lowerTrimmedText contains "/") then
+			set tlds to {".com", ".cn", ".ai", ".net", ".org", ".io", ".dev", ".app", ".me", ".tv", ".co", ".uk", ".jp", ".de", ".info", ".biz"}
+			repeat with currentTLD in tlds
+				if lowerTrimmedText ends with currentTLD then
+					if length of lowerTrimmedText > length of currentTLD then
+						set isLikelyURL to true
+						exit repeat
+					end if
+				end if
+			end repeat
+		end if
+	end if
+	
+	if isLikelyURL then
+		set urlToOpen to trimmedClipboardText
+		if not ((urlToOpen begins with "http://") or (urlToOpen begins with "https://")) then
+			set urlToOpen to "http://" & urlToOpen
+		end if
+		
+		try
+			do shell script "open -a 'Google Chrome' " & quoted form of urlToOpen
+			return -- Successfully opened URL, so exit the script
+		on error errMsg number errNum
+			-- display dialog "无法直接打开链接: " & urlToOpen & return & return & errMsg buttons {"好的"} default button "好的" with icon caution
+			-- Fall through to the menu
+		end try
+	end if
+end if
+
+-- If clipboard was empty, not a URL, or direct URL opening failed, show the menu
+set userChoice to choose from list {"🔍 从剪贴板搜索 Google", "📺 打开 YouTube", "📝 空地址（备用）"} with prompt "请选择一个操作：" default items {"🔍 从剪贴板搜索 Google"} with title "剪贴板助手"
+
+if userChoice is false then return -- 用户取消
+
+set chosenOption to item 1 of userChoice
+
+if chosenOption is "🔍 从剪贴板搜索 Google" then
+	set searchText to ""
+	set useClipboardForSearch to true
+	
+	if trimmedClipboardText is "" then
+		set dialogResult to display dialog "剪贴板中无可用文本，请输入搜索内容：" default answer "" with icon note buttons {"取消", "搜索"} default button "搜索"
+		if button returned of dialogResult is "搜索" then
+			set searchText to text returned of dialogResult
+			set useClipboardForSearch to false
+		else
+			return -- User cancelled input
+		end if
+	else if (length of trimmedClipboardText) > 50 then
+		set confirmDialog to display dialog "剪贴板内容超过 50 字符，可能不是你想搜索的内容：" & return & return & "\"" & trimmedClipboardText & "\"" & return & return & "是否使用它进行搜索？" with icon caution buttons {"输入新的内容", "继续使用剪贴板"} default button "输入新的内容"
+		if button returned of confirmDialog is "输入新的内容" then
+			set dialogResult to display dialog "请输入搜索关键字：" default answer "" with icon note buttons {"取消", "搜索"} default button "搜索"
+			if button returned of dialogResult is "搜索" then
+				set searchText to text returned of dialogResult
+				set useClipboardForSearch to false
+			else
+				return -- User cancelled input
+			end if
+		else
+			set searchText to trimmedClipboardText
+		end if
+	else
+		set searchText to trimmedClipboardText
+	end if
+	
+	if searchText is "" then
+		display dialog "未提供搜索内容。" buttons {"好"} default button "好" with icon stop
+		return
+	end if
+	
+	set encodedText to do shell script "python3 -c 'import urllib.parse, sys; print(urllib.parse.quote(sys.argv[1]))' " & quoted form of searchText
+	set googleURL to "https://www.google.com/search?q=" & encodedText
+	do shell script "open -a 'Google Chrome' " & quoted form of googleURL
+	
+else if chosenOption is "📺 打开 YouTube" then
+	do shell script "open -a 'Google Chrome' https://www.youtube.com"
+	
+else if chosenOption is "📝 空地址（备用）" then
+	display dialog "该功能尚未实现，可用于扩展。" buttons {"好"} default button "好" with icon note
+end if
